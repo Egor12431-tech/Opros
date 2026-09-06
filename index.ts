@@ -3,7 +3,19 @@ import { cors } from "hono/cors";
 import { Pool } from "pg";
 
 // ============================================================
-// 1. ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ
+// 1. ДИАГНОСТИКА ПРИ ЗАПУСКЕ
+// ============================================================
+
+console.log("=== ДИАГНОСТИКА ===");
+console.log("PORT:", process.env.PORT);
+console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
+if (process.env.DATABASE_URL) {
+  console.log("DATABASE_URL starts with:", process.env.DATABASE_URL.substring(0, 40) + "...");
+}
+console.log("=== КОНЕЦ ДИАГНОСТИКИ ===");
+
+// ============================================================
+// 2. ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ
 // ============================================================
 
 const pool = new Pool({
@@ -44,7 +56,7 @@ await pool.query(`
 console.log("✅ База данных готова");
 
 // ============================================================
-// 2. ВСЕ ВОПРОСЫ
+// 3. ВСЕ ВОПРОСЫ
 // ============================================================
 
 const SECTION_A_QUESTIONS = [
@@ -116,7 +128,7 @@ const SECTION_G_QUESTIONS = [
 ];
 
 // ============================================================
-// 3. ФУНКЦИЯ АНАЛИЗА ДЛЯ ОДНОГО КОЛЛЕГИ
+// 4. ФУНКЦИЯ АНАЛИЗА ДЛЯ ОДНОГО КОЛЛЕГИ
 // ============================================================
 
 function analyzeColleague(scores: Record<string, number>) {
@@ -164,7 +176,7 @@ function analyzeColleague(scores: Record<string, number>) {
 }
 
 // ============================================================
-// 4. СОХРАНЕНИЕ И АГРЕГАЦИЯ
+// 5. СОХРАНЕНИЕ И АГРЕГАЦИЯ
 // ============================================================
 
 async function saveResponse(data: any) {
@@ -261,7 +273,7 @@ async function updateAggregates(colleagues: any[]) {
 }
 
 // ============================================================
-// 5. МАРШРУТЫ
+// 6. МАРШРУТЫ
 // ============================================================
 
 const app = new Hono();
@@ -271,7 +283,7 @@ app.get("/", async (c) => c.text("🛡️ ISL Survey API"));
 
 app.get("/api/health", async (c) => c.json({ status: "ok" }));
 
-// СТРАНИЦА ОПРОСНИКА (без поля "Ваша фамилия")
+// СТРАНИЦА ОПРОСНИКА
 app.get("/survey", async (c) => {
   return c.html(`<!DOCTYPE html>
 <html lang="ru">
@@ -295,8 +307,6 @@ app.get("/survey", async (c) => {
     .text-input { padding:8px 12px; border:1px solid #ccc; border-radius:6px; width:100%; max-width:400px; font-size:14px; }
     .text-input:focus { outline:none; border-color:#1a2a6c; }
     .btn { padding:12px 24px; border:none; border-radius:10px; font-size:16px; font-weight:600; cursor:pointer; }
-    .btn-primary { background:linear-gradient(135deg,#1a2a6c,#2d4373); color:white; }
-    .btn-primary:hover { transform:translateY(-2px); }
     .btn-success { background:#28a745; color:white; }
     .btn-success:hover { transform:translateY(-2px); }
     .btn-danger { background:#dc3545; color:white; }
@@ -305,14 +315,13 @@ app.get("/survey", async (c) => {
     .btn-submit:hover { transform:translateY(-2px); }
     .btn-submit:disabled { opacity:0.6; cursor:not-allowed; }
     .colleague-block { background:#e8f0fe; border-radius:12px; padding:20px; margin:20px 0; border:2px dashed #1a2a6c; }
-    .colleague-block .remove-btn { float:right; }
+    .colleague-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; }
     .result { margin-top:25px; padding:25px; border-radius:12px; display:none; }
     .result.success { background:#e8f5e9; border-left:4px solid #28a745; display:block; }
     .result.error { background:#fce4ec; border-left:4px solid #dc3545; display:block; }
     .progress { background:#e0e0e0; border-radius:10px; height:8px; margin-bottom:20px; overflow:hidden; }
     .progress-bar { height:100%; background:linear-gradient(135deg,#1a2a6c,#2d4373); border-radius:10px; transition:width 0.3s; width:0%; }
     .footer { text-align:center; margin-top:20px; color:#999; font-size:12px; }
-    .colleague-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; }
     .anonymity-badge { background:#e8f5e9; padding:10px 16px; border-radius:8px; margin-bottom:20px; border-left:4px solid #28a745; }
     .anonymity-badge strong { color:#1a2a6c; }
     @media (max-width:600px) { .container { padding:20px; } .options { gap:10px; } }
@@ -325,7 +334,7 @@ app.get("/survey", async (c) => {
   <span class="badge">Оренбургский филиал ООО «Газпромтранс»</span>
 
   <div class="anonymity-badge">
-    <strong>🔒 Анонимный опрос</strong> — ваши ответы не привязаны к вашей фамилии. Вы оцениваете своих коллег, и результаты по каждому коллеге будут агрегированы.
+    <strong>🔒 Анонимный опрос</strong> — ваши ответы не привязаны к вашей фамилии.
   </div>
 
   <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
@@ -337,15 +346,14 @@ app.get("/survey", async (c) => {
     <div class="section-title">📋 Раздел А. Культура безопасности</div>
     <div id="sectionA"></div>
 
-    <!-- Раздел Б: Оценка коллег -->
-    <div class="section-title">📌 Раздел Б. Оценка коллег по безопасности</div>
-    <div class="section-desc">Добавьте каждого коллегу, которого хотите оценить, и ответьте на вопросы о нём.</div>
+    <!-- Раздел Б -->
+    <div class="section-title">📌 Раздел Б. Оценка коллег</div>
+    <div class="section-desc">Добавьте каждого коллегу, которого хотите оценить.</div>
     <div id="colleaguesContainer"></div>
     <button type="button" class="btn btn-success" onclick="addColleague()">➕ Добавить коллегу</button>
 
     <!-- Раздел В -->
     <div class="section-title">👥 Раздел В. Социометрия</div>
-    <div class="section-desc">Укажите фамилии коллег (можно оставить пустым).</div>
     <div id="sectionV"></div>
 
     <!-- Раздел Г -->
@@ -616,7 +624,10 @@ app.get("/survey", async (c) => {
 </html>`);
 });
 
-// ОТПРАВКА ОТВЕТОВ
+// ============================================================
+// 7. ОТПРАВКА ОТВЕТОВ
+// ============================================================
+
 app.post("/api/submit", async (c) => {
   try {
     const data = await c.req.json();
@@ -643,8 +654,6 @@ app.post("/api/submit", async (c) => {
     };
 
     await saveResponse(saveData);
-
-    // Обновляем агрегированные данные по коллегам
     await updateAggregates(colleagues);
 
     return c.json({
@@ -659,7 +668,7 @@ app.post("/api/submit", async (c) => {
 });
 
 // ============================================================
-// СТРАНИЦА РЕЗУЛЬТАТОВ ДЛЯ СОЗДАТЕЛЯ
+// 8. СТРАНИЦА РЕЗУЛЬТАТОВ ДЛЯ СОЗДАТЕЛЯ
 // ============================================================
 
 app.get("/results", async (c) => {
@@ -710,10 +719,8 @@ app.get("/results", async (c) => {
     .badge.candidate { background:#cce5ff; color:#004085; }
     .badge.neutral { background:#e2e3e5; color:#383d41; }
     .badge.resistance { background:#f8d7da; color:#721c24; }
-    .badge.unknown { background:#fff3cd; color:#856404; }
     .empty { text-align:center; color:#999; padding:40px; }
     .footer { margin-top:20px; text-align:center; color:#999; font-size:12px; border-top:1px solid #eee; padding-top:15px; }
-    .rating-bar { display:inline-block; height:8px; border-radius:4px; background:#1a2a6c; }
     .table-wrap { overflow-x:auto; max-height:600px; overflow-y:auto; }
     .export-btn { padding:8px 16px; background:#1a2a6c; color:white; border:none; border-radius:6px; cursor:pointer; margin-bottom:15px; font-size:14px; }
     .export-btn:hover { opacity:0.8; }
@@ -835,15 +842,14 @@ app.get("/results", async (c) => {
 });
 
 // ============================================================
-// ЗАПУСК
+// 9. ЗАПУСК
 // ============================================================
 
 const PORT = parseInt(process.env.PORT || "3000");
 
-// Исправленные console.log (без экранирования)
 console.log("🚀 ISL Survey API запущен на порту " + PORT);
 console.log("🔗 /survey — опросник");
-console.log("📊 /results — результаты для создателя (агрегированные по коллегам)");
+console.log("📊 /results — результаты для создателя");
 
 export default {
   port: PORT,
