@@ -11,7 +11,7 @@ if (process.env.DATABASE_URL) {
 console.log("=== КОНЕЦ ДИАГНОСТИКИ ===");
 
 // ============================================================
-// 1. ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ (ИСПРАВЛЕНО)
+// 1. ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ
 // ============================================================
 
 let pool: Pool | null = null;
@@ -29,11 +29,10 @@ try {
       },
     });
 
-    // Проверяем подключение
     await pool.query("SELECT 1");
     console.log("✅ Подключение к PostgreSQL установлено");
 
-    // Создаём таблицы
+    // СОЗДАНИЕ ТАБЛИЦ (g3 и g4 теперь TEXT)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS survey_responses (
         id SERIAL PRIMARY KEY,
@@ -42,7 +41,7 @@ try {
         a6 INT, a7 INT, a8 INT, a9 INT, a10 INT,
         colleagues JSONB,
         v1 TEXT, v2 TEXT, v3 TEXT, v4 TEXT, v5 TEXT, v6 TEXT,
-        g1 TEXT, g2 TEXT, g3 INT, g4 INT, g5 TEXT
+        g1 TEXT, g2 TEXT, g3 TEXT, g4 TEXT, g5 TEXT
       )
     `);
 
@@ -86,35 +85,30 @@ const SECTION_A_QUESTIONS = [
 ];
 
 const SECTION_B_QUESTIONS = [
-  // Б1: Advocacy (6)
   { id: "b1_1", text: "Часто говорит коллегам о том, как сделать работу безопаснее", factor: "advocacy" },
   { id: "b1_2", text: "Предлагает руководству идеи по улучшению безопасности", factor: "advocacy" },
   { id: "b1_3", text: "Активно участвует в обсуждении вопросов безопасности", factor: "advocacy" },
   { id: "b1_4", text: "Берёт на себя инициативу, когда видит опасность", factor: "advocacy" },
   { id: "b1_5", text: "Делится с коллегами информацией о новых правилах", factor: "advocacy" },
   { id: "b1_6", text: "Поощряет других высказываться о безопасности", factor: "advocacy" },
-  // Б2: Support (6)
   { id: "b2_1", text: "К нему приходят за советом по безопасности", factor: "support" },
   { id: "b2_2", text: "Помогает новым работникам освоить правила", factor: "support" },
   { id: "b2_3", text: "Готов прийти на помощь, если видит небезопасные действия", factor: "support" },
   { id: "b2_4", text: "Отзывчив на проблемы безопасности коллег", factor: "support" },
   { id: "b2_5", text: "Даёт практические советы по безопасности", factor: "support" },
   { id: "b2_6", text: "Поддерживает тех, кто сообщает о нарушениях", factor: "support" },
-  // Б3: Mindset (6)
   { id: "b3_1", text: "Понимает, почему правила безопасности важны", factor: "mindset" },
   { id: "b3_2", text: "Безопасность для него — личный приоритет", factor: "mindset" },
   { id: "b3_3", text: "Может объяснить последствия нарушений", factor: "mindset" },
   { id: "b3_4", text: "Знает, как действовать в нештатной ситуации", factor: "mindset" },
   { id: "b3_5", text: "Уверен в своих знаниях по охране труда", factor: "mindset" },
   { id: "b3_6", text: "Считает безопасность не менее важной, чем план", factor: "mindset" },
-  // Б4: Reporting (6)
   { id: "b4_1", text: "Сообщает о нарушениях, чтобы их исправить", factor: "reporting" },
   { id: "b4_2", text: "Не боится говорить о проблемах безопасности", factor: "reporting" },
   { id: "b4_3", text: "Поощряет сообщать о «почти-инцидентах»", factor: "reporting" },
   { id: "b4_4", text: "Честно рассказывает о своих ошибках", factor: "reporting" },
   { id: "b4_5", text: "Поддерживает культуру открытости", factor: "reporting" },
   { id: "b4_6", text: "Считает важным документировать все инциденты", factor: "reporting" },
-  // Б5: Reluctance (6) — ОБРАТНАЯ ШКАЛА
   { id: "b5_1", text: "Редко участвует в инициативах по безопасности", factor: "reluctance", reverse: true },
   { id: "b5_2", text: "Неохотно обсуждает безопасность, если это не касается его лично", factor: "reluctance", reverse: true },
   { id: "b5_3", text: "Редко делится информацией по безопасности", factor: "reluctance", reverse: true },
@@ -172,7 +166,7 @@ function analyzeColleague(scores: Record<string, number>) {
 }
 
 // ============================================================
-// 4. СОХРАНЕНИЕ В БАЗУ
+// 4. СОХРАНЕНИЕ В БАЗУ (С ПРЕОБРАЗОВАНИЕМ ТЕКСТА В ЧИСЛА)
 // ============================================================
 
 async function saveToDatabase(data: any, colleagues: any[]) {
@@ -180,7 +174,23 @@ async function saveToDatabase(data: any, colleagues: any[]) {
     throw new Error("База данных не подключена");
   }
 
-  // Сохраняем ответ
+  // Преобразование текстовых ответов в числа
+  const mapOptionToNumber = (value: string) => {
+    const map: Record<string, number> = {
+      "Всегда": 5,
+      "Часто": 4,
+      "Иногда": 3,
+      "Редко": 2,
+      "Не участвую": 1,
+      "Отлично": 5,
+      "Хорошо": 4,
+      "Удовлетворительно": 3,
+      "Плохо": 2,
+      "Не знаю": 1,
+    };
+    return map[value] || null;
+  };
+
   await pool.query(
     `INSERT INTO survey_responses (
       a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
@@ -195,7 +205,11 @@ async function saveToDatabase(data: any, colleagues: any[]) {
       JSON.stringify(colleagues),
       data.v1 || "", data.v2 || "", data.v3 || "",
       data.v4 || "", data.v5 || "", data.v6 || "",
-      data.g1, data.g2, data.g3, data.g4, data.g5,
+      data.g1 || "",
+      data.g2 || "",
+      mapOptionToNumber(data.g3) || 0,
+      mapOptionToNumber(data.g4) || 0,
+      data.g5 || "",
     ]
   );
 
@@ -265,7 +279,7 @@ app.get("/", async (c) => c.text("🛡️ ISL Survey API"));
 app.get("/api/health", async (c) => c.json({ status: "ok" }));
 
 // ============================================================
-// 6. СТРАНИЦА ОПРОСНИКА (HTML)
+// 6. СТРАНИЦА ОПРОСНИКА
 // ============================================================
 
 app.get("/survey", async (c) => {
@@ -508,7 +522,7 @@ app.get("/survey", async (c) => {
 });
 
 // ============================================================
-// 7. ОТПРАВКА ОТВЕТОВ (API)
+// 7. ОТПРАВКА ОТВЕТОВ
 // ============================================================
 
 app.post("/api/submit", async (c) => {
