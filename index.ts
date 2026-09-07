@@ -10,10 +10,6 @@ if (process.env.DATABASE_URL) {
 }
 console.log("=== КОНЕЦ ДИАГНОСТИКИ ===");
 
-// ============================================================
-// ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ
-// ============================================================
-
 let pool: Pool | null = null;
 
 try {
@@ -21,18 +17,13 @@ try {
     console.error("❌ ОШИБКА: DATABASE_URL не задана!");
   } else {
     console.log("✅ DATABASE_URL найдена");
-
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: {
-        rejectUnauthorized: false,
-      },
+      ssl: { rejectUnauthorized: false },
     });
-
     await pool.query("SELECT 1");
     console.log("✅ Подключение к PostgreSQL установлено");
 
-    // СОЗДАНИЕ ТАБЛИЦ
     await pool.query(`
       CREATE TABLE IF NOT EXISTS survey_responses (
         id SERIAL PRIMARY KEY,
@@ -64,12 +55,7 @@ try {
   }
 } catch (err) {
   console.error("❌ Ошибка при инициализации базы данных:", err);
-  console.log("⚠️ Продолжаем работу без базы данных (только диагностика)");
 }
-
-// ============================================================
-// ВСЕ ВОПРОСЫ
-// ============================================================
 
 const SECTION_A_QUESTIONS = [
   { id: "a1", text: "Как вы оцениваете отношение к безопасности на вашем участке?", options: [1, 2, 3, 4] },
@@ -134,13 +120,8 @@ const SECTION_G_QUESTIONS = [
   { id: "g5", text: "Что мешает соблюдать правила безопасности?", options: ["Нехватка времени", "Сложность оборудования", "Неудобство СИЗ", "Непонимание правил", "Отсутствие контроля", "Давление руководства"] },
 ];
 
-// ============================================================
-// ФУНКЦИЯ АНАЛИЗА
-// ============================================================
-
 function analyzeColleague(scores: Record<string, number>) {
   const factors = { advocacy: 0, support: 0, mindset: 0, reporting: 0, reluctance: 0 };
-
   for (const [key, value] of Object.entries(scores)) {
     if (key.startsWith("b1_")) factors.advocacy += value;
     else if (key.startsWith("b2_")) factors.support += value;
@@ -148,11 +129,9 @@ function analyzeColleague(scores: Record<string, number>) {
     else if (key.startsWith("b4_")) factors.reporting += value;
     else if (key.startsWith("b5_")) factors.reluctance += value;
   }
-
   for (const key of Object.keys(factors)) {
     factors[key as keyof typeof factors] = Math.round((factors[key as keyof typeof factors] / 6) * 100) / 100;
   }
-
   let category = "Нейтральный";
   if (factors.advocacy >= 4.0 && factors.support >= 4.0 && factors.mindset >= 4.0 && factors.reporting >= 4.0 && factors.reluctance >= 3.5) {
     category = "Лидер безопасности";
@@ -161,35 +140,18 @@ function analyzeColleague(scores: Record<string, number>) {
   } else if (factors.reluctance < 3.0) {
     category = "Лидер сопротивления";
   }
-
   return { factors, category };
 }
 
-// ============================================================
-// СОХРАНЕНИЕ В БАЗУ
-// ============================================================
-
 async function saveToDatabase(data: any, colleagues: any[]) {
-  if (!pool) {
-    throw new Error("База данных не подключена");
-  }
-
+  if (!pool) throw new Error("База данных не подключена");
   const mapOptionToNumber = (value: string) => {
     const map: Record<string, number> = {
-      "Всегда": 5,
-      "Часто": 4,
-      "Иногда": 3,
-      "Редко": 2,
-      "Не участвую": 1,
-      "Отлично": 5,
-      "Хорошо": 4,
-      "Удовлетворительно": 3,
-      "Плохо": 2,
-      "Не знаю": 1,
+      "Всегда": 5, "Часто": 4, "Иногда": 3, "Редко": 2, "Не участвую": 1,
+      "Отлично": 5, "Хорошо": 4, "Удовлетворительно": 3, "Плохо": 2, "Не знаю": 1,
     };
     return map[value] || null;
   };
-
   await pool.query(
     `INSERT INTO survey_responses (
       a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
@@ -204,25 +166,20 @@ async function saveToDatabase(data: any, colleagues: any[]) {
       JSON.stringify(colleagues),
       data.v1 || "", data.v2 || "", data.v3 || "",
       data.v4 || "", data.v5 || "", data.v6 || "",
-      data.g1 || "",
-      data.g2 || "",
+      data.g1 || "", data.g2 || "",
       mapOptionToNumber(data.g3) || 0,
       mapOptionToNumber(data.g4) || 0,
       data.g5 || "",
     ]
   );
-
   for (const col of colleagues) {
     const name = col.name;
     if (!name || name.trim() === "") continue;
-
     const analysis = analyzeColleague(col.scores);
-
     const existing = await pool.query(
       "SELECT * FROM colleague_aggregates WHERE colleague_name = $1",
       [name]
     );
-
     if (existing.rows.length > 0) {
       const cur = existing.rows[0];
       const total = cur.total_ratings + 1;
@@ -231,12 +188,10 @@ async function saveToDatabase(data: any, colleagues: any[]) {
       const avgM = ((cur.avg_mindset * cur.total_ratings) + analysis.factors.mindset) / total;
       const avgR = ((cur.avg_reporting * cur.total_ratings) + analysis.factors.reporting) / total;
       const avgRel = ((cur.avg_reluctance * cur.total_ratings) + analysis.factors.reluctance) / total;
-
       let cat = "Нейтральный";
       if (avgA >= 4.0 && avgS >= 4.0 && avgM >= 4.0 && avgR >= 4.0 && avgRel >= 3.5) cat = "Лидер безопасности";
       else if (avgA >= 3.5 && avgS >= 3.5 && avgM >= 3.5) cat = "Кандидат в лидеры";
       else if (avgRel < 3.0) cat = "Лидер сопротивления";
-
       await pool.query(
         `UPDATE colleague_aggregates SET
           total_ratings = $1, avg_advocacy = $2, avg_support = $3,
@@ -251,34 +206,19 @@ async function saveToDatabase(data: any, colleagues: any[]) {
           colleague_name, total_ratings,
           avg_advocacy, avg_support, avg_mindset, avg_reporting, avg_reluctance, category
         ) VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`,
-        [
-          name,
-          analysis.factors.advocacy,
-          analysis.factors.support,
-          analysis.factors.mindset,
-          analysis.factors.reporting,
-          analysis.factors.reluctance,
-          analysis.category,
-        ]
+        [name, analysis.factors.advocacy, analysis.factors.support,
+          analysis.factors.mindset, analysis.factors.reporting,
+          analysis.factors.reluctance, analysis.category]
       );
     }
   }
 }
 
-// ============================================================
-// МАРШРУТЫ
-// ============================================================
-
 const app = new Hono();
 app.use("/*", cors());
 
 app.get("/", async (c) => c.text("🛡️ ISL Survey API"));
-
 app.get("/api/health", async (c) => c.json({ status: "ok" }));
-
-// ============================================================
-// СТРАНИЦА ОПРОСНИКА
-// ============================================================
 
 app.get("/survey", async (c) => {
   return c.html(`<!DOCTYPE html>
@@ -342,7 +282,7 @@ app.get("/survey", async (c) => {
     <button type="submit" class="btn-submit" id="submitBtn">📤 Отправить ответы</button>
   </form>
   <div id="result" class="result"></div>
-  <div class="footer">© ООО «Газпромтранс»</div>
+  <div class="footer">© ООО «Газпромтранс» · Оренбургский филиал · 2026</div>
 </div>
 <script>
   const sectionAQuestions = ${JSON.stringify(SECTION_A_QUESTIONS)};
@@ -519,17 +459,12 @@ app.get("/survey", async (c) => {
 </html>`);
 });
 
-// ============================================================
-// ОТПРАВКА ОТВЕТОВ
-// ============================================================
-
 app.post("/api/submit", async (c) => {
   try {
     const data = await c.req.json();
     if (!data || Object.keys(data).length === 0) {
       return c.json({ status: "error", message: "Нет данных" }, 400);
     }
-
     let colleagues = [];
     if (data.colleaguesData) {
       try {
@@ -538,65 +473,28 @@ app.post("/api/submit", async (c) => {
         console.error("Ошибка парсинга colleaguesData:", e);
       }
     }
-
     await saveToDatabase(data, colleagues);
-
-    return c.json({
-      status: "success",
-      id: Date.now(),
-      message: "Спасибо за ответы!",
-    });
+    return c.json({ status: "success", id: Date.now(), message: "Спасибо за ответы!" });
   } catch (error: any) {
     console.error("Ошибка:", error);
     return c.json({ status: "error", message: error.message }, 500);
   }
 });
 
-// ============================================================
-// СТРАНИЦА РЕЗУЛЬТАТОВ (С ДИАГНОСТИКОЙ)
-// ============================================================
-
 app.get("/results", async (c) => {
   try {
     console.log("📊 Запрос к странице /results");
-
     const directPool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
     });
 
-    // Диагностика: проверяем наличие таблицы и данных
-    const tableCheck = await directPool.query(`
-      SELECT EXISTS (
-        SELECT 1 FROM information_schema.tables 
-        WHERE table_name = 'colleague_aggregates'
-      )
-    `);
-
-    const tableExists = tableCheck.rows[0].exists;
-    console.log("📊 Таблица colleague_aggregates существует:", tableExists);
-
-    if (!tableExists) {
-      await directPool.end();
-      return c.html(`
-        <h1>❌ Таблица colleague_aggregates не найдена</h1>
-        <p>Пожалуйста, перезапустите проект для создания таблицы.</p>
-      `);
-    }
-
-    // Получаем данные
     const result = await directPool.query(`
       SELECT colleague_name, total_ratings,
         avg_advocacy, avg_support, avg_mindset, avg_reporting, avg_reluctance,
         category, updated_at
       FROM colleague_aggregates
-      ORDER BY CASE category
-        WHEN 'Лидер безопасности' THEN 1
-        WHEN 'Кандидат в лидеры' THEN 2
-        WHEN 'Нейтральный' THEN 3
-        WHEN 'Лидер сопротивления' THEN 4
-        ELSE 5 END,
-        total_ratings DESC
+      ORDER BY total_ratings DESC
     `);
 
     console.log("📊 Получено строк:", result.rows.length);
@@ -606,22 +504,14 @@ app.get("/results", async (c) => {
 
     await directPool.end();
 
-    // Если данных нет — показываем диагностику
     if (result.rows.length === 0) {
-      // Проверяем, есть ли данные в survey_responses
-      const countResult = await directPool.query("SELECT COUNT(*) FROM survey_responses");
-      const count = countResult.rows[0].count;
-
       return c.html(`
         <h1>📊 Результаты опроса ISL</h1>
         <p style="color:orange;">⚠️ В таблице colleague_aggregates нет данных</p>
-        <p>В таблице survey_responses найдено записей: <strong>${count}</strong></p>
-        <p>Если вы только что отправили опрос, подождите 1-2 минуты и обновите страницу.</p>
-        <p>Или выполните ручную агрегацию через SQL-редактор.</p>
+        <p>Отправьте тестовый опрос и обновите страницу.</p>
       `);
     }
 
-    // Если данные есть — показываем таблицу
     return c.html(`<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -688,11 +578,11 @@ app.get("/results", async (c) => {
     results.forEach((r, i) => {
       const cls = getBadge(r.category);
       html += '<tr><td>' + (i+1) + '</td><td><strong>' + r.colleague_name + '</strong></td><td>' + r.total_ratings + '</td>';
-      html += '<td>' + (r.avg_advocacy ? r.avg_advocacy.toFixed(2) : '—') + '</td>';
-      html += '<td>' + (r.avg_support ? r.avg_support.toFixed(2) : '—') + '</td>';
-      html += '<td>' + (r.avg_mindset ? r.avg_mindset.toFixed(2) : '—') + '</td>';
-      html += '<td>' + (r.avg_reporting ? r.avg_reporting.toFixed(2) : '—') + '</td>';
-      html += '<td>' + (r.avg_reluctance ? r.avg_reluctance.toFixed(2) : '—') + '</td>';
+      html += '<td>' + (r.avg_advocacy ? Number(r.avg_advocacy).toFixed(2) : '—') + '</td>';
+      html += '<td>' + (r.avg_support ? Number(r.avg_support).toFixed(2) : '—') + '</td>';
+      html += '<td>' + (r.avg_mindset ? Number(r.avg_mindset).toFixed(2) : '—') + '</td>';
+      html += '<td>' + (r.avg_reporting ? Number(r.avg_reporting).toFixed(2) : '—') + '</td>';
+      html += '<td>' + (r.avg_reluctance ? Number(r.avg_reluctance).toFixed(2) : '—') + '</td>';
       html += '<td><span class="badge ' + cls + '">' + (r.category || '—') + '</span></td>';
       html += '<td>' + (r.updated_at ? new Date(r.updated_at).toLocaleDateString('ru-RU') : '—') + '</td></tr>';
     });
@@ -720,17 +610,11 @@ app.get("/results", async (c) => {
     return c.html(`
       <h1>❌ Ошибка</h1>
       <pre>${err.message}</pre>
-      <p>Проверьте подключение к базе данных.</p>
     `);
   }
 });
 
-// ============================================================
-// ЗАПУСК
-// ============================================================
-
 const PORT = parseInt(process.env.PORT || "3000");
-
 console.log("🚀 ISL Survey API запущен на порту " + PORT);
 console.log("🔗 /survey — опросник");
 console.log("📊 /results — результаты для создателя");
