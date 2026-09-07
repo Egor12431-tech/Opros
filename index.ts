@@ -481,135 +481,163 @@ app.post("/api/submit", async (c) => {
   }
 });
 
+// ============================================================
+// СТРАНИЦА РЕЗУЛЬТАТОВ (ПРОСТАЯ И НАДЁЖНАЯ)
+// ============================================================
+
 app.get("/results", async (c) => {
   try {
-    console.log("📊 Запрос к странице /results");
     const directPool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
     });
 
-    const result = await directPool.query(`
-      SELECT colleague_name, total_ratings,
-        avg_advocacy, avg_support, avg_mindset, avg_reporting, avg_reluctance,
-        category, updated_at
-      FROM colleague_aggregates
-      ORDER BY total_ratings DESC
-    `);
-
-    console.log("📊 Получено строк:", result.rows.length);
-    if (result.rows.length > 0) {
-      console.log("📊 Первая строка:", JSON.stringify(result.rows[0]));
-    }
-
+    const result = await directPool.query("SELECT * FROM colleague_aggregates ORDER BY id");
     await directPool.end();
 
-    if (result.rows.length === 0) {
-      return c.html(`
+    // Формируем простую HTML-страницу
+    let html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Результаты опроса ISL</title>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; padding: 40px; }
+          .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 16px; padding: 30px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+          h1 { color: #1a2a6c; }
+          .subtitle { color: #666; margin-bottom: 20px; }
+          .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin: 20px 0; }
+          .stat-card { background: #f8f9fa; padding: 15px; border-radius: 10px; text-align: center; border-left: 4px solid #1a2a6c; }
+          .stat-card .number { font-size: 28px; font-weight: 700; color: #1a2a6c; }
+          .stat-card .label { font-size: 13px; color: #666; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+          th { background: #1a2a6c; color: white; padding: 12px; text-align: left; }
+          td { padding: 10px 12px; border-bottom: 1px solid #eee; }
+          .badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+          .badge.leader { background: #d4edda; color: #155724; }
+          .badge.candidate { background: #cce5ff; color: #004085; }
+          .badge.neutral { background: #e2e3e5; color: #383d41; }
+          .badge.resistance { background: #f8d7da; color: #721c24; }
+          .export-btn { background: #1a2a6c; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; margin: 15px 0; }
+          .export-btn:hover { opacity: 0.9; }
+          .footer { margin-top: 30px; text-align: center; color: #999; font-size: 12px; border-top: 1px solid #eee; padding-top: 20px; }
+        </style>
+      </head>
+      <body>
+      <div class="container">
         <h1>📊 Результаты опроса ISL</h1>
-        <p style="color:orange;">⚠️ В таблице colleague_aggregates нет данных</p>
-        <p>Отправьте тестовый опрос и обновите страницу.</p>
-      `);
+        <p class="subtitle">Оренбургский филиал ООО «Газпромтранс»</p>
+        <p style="color:green; font-weight:bold;">✅ Найдено записей: ${result.rows.length}</p>
+    `;
+
+    // Считаем статистику по категориям
+    const categories: Record<string, number> = {};
+    result.rows.forEach((r: any) => {
+      const cat = r.category || 'Не определена';
+      categories[cat] = (categories[cat] || 0) + 1;
+    });
+
+    html += `<div class="stats">`;
+    html += `<div class="stat-card"><div class="number">${result.rows.length}</div><div class="label">Всего коллег</div></div>`;
+    const order = ['Лидер безопасности', 'Кандидат в лидеры', 'Нейтральный', 'Лидер сопротивления'];
+    order.forEach(cat => {
+      if (categories[cat]) {
+        const cls = cat === 'Лидер безопасности' ? 'leader' :
+                    cat === 'Кандидат в лидеры' ? 'candidate' :
+                    cat === 'Лидер сопротивления' ? 'resistance' : 'neutral';
+        html += `<div class="stat-card"><div class="number">${categories[cat]}</div><div class="label"><span class="badge ${cls}">${cat}</span></div></div>`;
+      }
+    });
+    html += `</div>`;
+
+    html += `<button class="export-btn" onclick="exportCSV()">📥 Скачать CSV</button>`;
+
+    if (result.rows.length === 0) {
+      html += `<p style="color:orange;">⚠️ Нет данных</p>`;
+    } else {
+      html += `
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Коллега</th>
+              <th>Оценок</th>
+              <th>Advocacy</th>
+              <th>Support</th>
+              <th>Mindset</th>
+              <th>Reporting</th>
+              <th>Reluctance</th>
+              <th>Категория</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+      result.rows.forEach((r: any, i: number) => {
+        const cls = r.category === 'Лидер безопасности' ? 'leader' :
+                    r.category === 'Кандидат в лидеры' ? 'candidate' :
+                    r.category === 'Лидер сопротивления' ? 'resistance' : 'neutral';
+        html += `
+          <tr>
+            <td>${i + 1}</td>
+            <td><strong>${r.colleague_name || '—'}</strong></td>
+            <td>${r.total_ratings || 0}</td>
+            <td>${r.avg_advocacy ? Number(r.avg_advocacy).toFixed(2) : '—'}</td>
+            <td>${r.avg_support ? Number(r.avg_support).toFixed(2) : '—'}</td>
+            <td>${r.avg_mindset ? Number(r.avg_mindset).toFixed(2) : '—'}</td>
+            <td>${r.avg_reporting ? Number(r.avg_reporting).toFixed(2) : '—'}</td>
+            <td>${r.avg_reluctance ? Number(r.avg_reluctance).toFixed(2) : '—'}</td>
+            <td><span class="badge ${cls}">${r.category || '—'}</span></td>
+          </tr>
+        `;
+      });
+      html += `
+          </tbody>
+        </table>
+      `;
     }
 
-    return c.html(`<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Результаты опроса ISL</title>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Segoe UI',sans-serif; background:#f5f7fa; padding:30px; }
-    .container { max-width:1200px; margin:0 auto; background:white; border-radius:16px; padding:30px; box-shadow:0 4px 20px rgba(0,0,0,0.08); }
-    h1 { color:#1a2a6c; }
-    .subtitle { color:#666; margin-bottom:20px; }
-    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:15px; margin-bottom:25px; }
-    .stat-card { background:#f8f9fa; padding:15px; border-radius:10px; text-align:center; border-left:4px solid #1a2a6c; }
-    .stat-card .number { font-size:24px; font-weight:700; color:#1a2a6c; }
-    .stat-card .label { font-size:13px; color:#666; }
-    .badge { display:inline-block; padding:3px 14px; border-radius:20px; font-size:13px; font-weight:600; }
-    .badge.leader { background:#d4edda; color:#155724; }
-    .badge.candidate { background:#cce5ff; color:#004085; }
-    .badge.neutral { background:#e2e3e5; color:#383d41; }
-    .badge.resistance { background:#f8d7da; color:#721c24; }
-    table { width:100%; border-collapse:collapse; font-size:14px; }
-    th { background:#1a2a6c; color:white; padding:10px; text-align:left; }
-    td { padding:8px 10px; border-bottom:1px solid #eee; }
-    .empty { text-align:center; color:#999; padding:40px; }
-    .export-btn { padding:8px 16px; background:#1a2a6c; color:white; border:none; border-radius:6px; cursor:pointer; margin-bottom:15px; font-size:14px; }
-    .footer { margin-top:20px; text-align:center; color:#999; font-size:12px; border-top:1px solid #eee; padding-top:15px; }
-  </style>
-</head>
-<body>
-<div class="container">
-  <h1>📊 Результаты опроса ISL</h1>
-  <p class="subtitle">Оренбургский филиал ООО «Газпромтранс»</p>
-  <p style="color:green; margin-bottom:15px;">✅ Найдено ${result.rows.length} записей</p>
-  <div class="stats" id="stats"></div>
-  <button class="export-btn" onclick="exportCSV()">📥 Скачать CSV</button>
-  <table><thead><tr>
-    <th>#</th><th>Коллега</th><th>Оценок</th>
-    <th>Advocacy</th><th>Support</th><th>Mindset</th><th>Reporting</th><th>Reluctance</th>
-    <th>Категория</th><th>Обновлено</th>
-  </tr></thead>
-  <tbody id="resultsBody"></tbody></table>
-  <div class="footer">© ООО «Газпромтранс» · Оренбургский филиал · 2026</div>
-</div>
-<script>
-  const results = ${JSON.stringify(result.rows)};
-  function getBadge(cat) {
-    const map = { 'Лидер безопасности':'leader', 'Кандидат в лидеры':'candidate', 'Нейтральный':'neutral', 'Лидер сопротивления':'resistance' };
-    return map[cat] || 'unknown';
-  }
-  function renderStats() {
-    const total = results.length;
-    const cats = {};
-    results.forEach(r => { const c = r.category || 'Не определена'; cats[c] = (cats[c] || 0) + 1; });
-    let html = '<div class="stat-card"><div class="number">' + total + '</div><div class="label">Всего коллег</div></div>';
-    const order = ['Лидер безопасности', 'Кандидат в лидеры', 'Нейтральный', 'Лидер сопротивления'];
-    order.forEach(c => { if (cats[c]) { html += '<div class="stat-card"><div class="number">' + cats[c] + '</div><div class="label"><span class="badge ' + getBadge(c) + '">' + c + '</span></div></div>'; } });
-    document.getElementById('stats').innerHTML = html;
-  }
-  function renderTable() {
-    const tbody = document.getElementById('resultsBody');
-    if (results.length === 0) { tbody.innerHTML = '<tr><td colspan="10" class="empty">Нет данных</td></tr>'; return; }
-    let html = '';
-    results.forEach((r, i) => {
-      const cls = getBadge(r.category);
-      html += '<tr><td>' + (i+1) + '</td><td><strong>' + r.colleague_name + '</strong></td><td>' + r.total_ratings + '</td>';
-      html += '<td>' + (r.avg_advocacy ? Number(r.avg_advocacy).toFixed(2) : '—') + '</td>';
-      html += '<td>' + (r.avg_support ? Number(r.avg_support).toFixed(2) : '—') + '</td>';
-      html += '<td>' + (r.avg_mindset ? Number(r.avg_mindset).toFixed(2) : '—') + '</td>';
-      html += '<td>' + (r.avg_reporting ? Number(r.avg_reporting).toFixed(2) : '—') + '</td>';
-      html += '<td>' + (r.avg_reluctance ? Number(r.avg_reluctance).toFixed(2) : '—') + '</td>';
-      html += '<td><span class="badge ' + cls + '">' + (r.category || '—') + '</span></td>';
-      html += '<td>' + (r.updated_at ? new Date(r.updated_at).toLocaleDateString('ru-RU') : '—') + '</td></tr>';
-    });
-    tbody.innerHTML = html;
-  }
-  function exportCSV() {
-    if (results.length === 0) { alert('Нет данных'); return; }
-    let csv = 'Коллега,Оценок,Advocacy,Support,Mindset,Reporting,Reluctance,Категория\n';
-    results.forEach(r => { csv += r.colleague_name + ',' + r.total_ratings + ',' + (r.avg_advocacy || '') + ',' + (r.avg_support || '') + ',' + (r.avg_mindset || '') + ',' + (r.avg_reporting || '') + ',' + (r.avg_reluctance || '') + ',' + (r.category || '') + '\n'; });
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'isl_results_' + new Date().toISOString().slice(0,10) + '.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-  renderStats();
-  renderTable();
-</script>
-</body>
-</html>`);
+    html += `
+      <script>
+        const rows = ${JSON.stringify(result.rows)};
+        function exportCSV() {
+          if (rows.length === 0) { alert('Нет данных'); return; }
+          let csv = 'Коллега,Оценок,Advocacy,Support,Mindset,Reporting,Reluctance,Категория\\n';
+          rows.forEach(r => {
+            csv += (r.colleague_name || '') + ',' +
+                   (r.total_ratings || 0) + ',' +
+                   (r.avg_advocacy || '') + ',' +
+                   (r.avg_support || '') + ',' +
+                   (r.avg_mindset || '') + ',' +
+                   (r.avg_reporting || '') + ',' +
+                   (r.avg_reluctance || '') + ',' +
+                   (r.category || '') + '\\n';
+          });
+          const blob = new Blob([csv], { type: 'text/csv' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'isl_results_' + new Date().toISOString().slice(0,10) + '.csv';
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      </script>
+    `;
+
+    html += `
+        <div class="footer">© ООО «Газпромтранс» · Оренбургский филиал · 2026</div>
+      </div>
+      </body>
+      </html>
+    `;
+
+    return c.html(html);
   } catch (err: any) {
     console.error("❌ Ошибка на странице /results:", err);
     return c.html(`
       <h1>❌ Ошибка</h1>
       <pre>${err.message}</pre>
+      <p>Проверьте подключение к базе данных.</p>
     `);
   }
 });
