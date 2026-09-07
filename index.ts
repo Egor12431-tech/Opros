@@ -32,7 +32,7 @@ try {
     await pool.query("SELECT 1");
     console.log("✅ Подключение к PostgreSQL установлено");
 
-    // СОЗДАНИЕ ТАБЛИЦ (g3 и g4 теперь TEXT)
+    // СОЗДАНИЕ ТАБЛИЦ
     await pool.query(`
       CREATE TABLE IF NOT EXISTS survey_responses (
         id SERIAL PRIMARY KEY,
@@ -166,7 +166,7 @@ function analyzeColleague(scores: Record<string, number>) {
 }
 
 // ============================================================
-// 4. СОХРАНЕНИЕ В БАЗУ (С ПРЕОБРАЗОВАНИЕМ ТЕКСТА В ЧИСЛА)
+// 4. СОХРАНЕНИЕ В БАЗУ
 // ============================================================
 
 async function saveToDatabase(data: any, colleagues: any[]) {
@@ -555,16 +555,18 @@ app.post("/api/submit", async (c) => {
 });
 
 // ============================================================
-// 8. СТРАНИЦА РЕЗУЛЬТАТОВ
+// 8. СТРАНИЦА РЕЗУЛЬТАТОВ (ИСПРАВЛЕННАЯ)
 // ============================================================
 
 app.get("/results", async (c) => {
   try {
-    if (!pool) {
-      return c.html(`<h1>❌ База данных не подключена</h1><p>Проверьте переменную DATABASE_URL</p>`);
-    }
+    // Прямое подключение к БД
+    const directPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    });
 
-    const result = await pool.query(`
+    const result = await directPool.query(`
       SELECT colleague_name, total_ratings,
         avg_advocacy, avg_support, avg_mindset, avg_reporting, avg_reluctance,
         category, updated_at
@@ -577,6 +579,8 @@ app.get("/results", async (c) => {
         ELSE 5 END,
         total_ratings DESC
     `);
+
+    await directPool.end();
 
     return c.html(`<!DOCTYPE html>
 <html lang="ru">
